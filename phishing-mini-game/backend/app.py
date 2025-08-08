@@ -50,7 +50,7 @@ _SAMPLES = [
 def seed_if_empty() -> Dict[str, int]:
     """Insert sample templates if table is empty; return per-level counts."""
     with Session(engine) as session:
-        # if empty, seed
+        # Seed only if empty
         exists = session.exec(select(EmailTemplate.id)).first()
         if not exists:
             session.add_all([
@@ -58,14 +58,13 @@ def seed_if_empty() -> Dict[str, int]:
                 for (l, s, sub, snip, ph) in _SAMPLES
             ])
             session.commit()
-        # counts per level (SQLAlchemy 2.0 style)
+
+        # Version-agnostic counts (works on SQLAlchemy 1.4/2.0)
         counts: Dict[str, int] = {}
         for lvl in ("easy", "medium", "hard"):
             counts[lvl] = session.exec(
-                select(func.count())
-                .select_from(EmailTemplate)
-                .where(EmailTemplate.level == lvl)
-            ).scalar_one()
+                select(func.count(EmailTemplate.id)).where(EmailTemplate.level == lvl)
+            ).one()[0]  # returns a 1-tuple like (5,)
         return counts
 # ---------------------------------------------
 
