@@ -1,7 +1,9 @@
+# app.py
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict
 from sqlmodel import select, Session
+from sqlalchemy import func
 
 from database import create_db_and_tables, get_session, engine
 from models import EmailTemplate, AcademyResult
@@ -12,8 +14,8 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000","http://localhost:3001",
-        "http://127.0.0.1:3000","http://127.0.0.1:3001",
+        "http://localhost:3000", "http://localhost:3001",
+        "http://127.0.0.1:3000", "http://127.0.0.1:3001",
         "https://*.vercel.app",
     ],
     allow_origin_regex=r"https://.*\.vercel\.app",
@@ -48,20 +50,23 @@ _SAMPLES = [
 def seed_if_empty() -> Dict[str, int]:
     """Insert sample templates if table is empty; return per-level counts."""
     with Session(engine) as session:
-        exists = session.exec(select(EmailTemplate)).first()
+        # if empty, seed
+        exists = session.exec(select(EmailTemplate.id)).first()
         if not exists:
             session.add_all([
                 EmailTemplate(level=l, sender=s, subject=sub, snippet=snip, is_phish=ph)
                 for (l, s, sub, snip, ph) in _SAMPLES
             ])
             session.commit()
-        # return counts
-        out = {}
+        # counts per level (SQLAlchemy 2.0 style)
+        counts: Dict[str, int] = {}
         for lvl in ("easy", "medium", "hard"):
-            out[lvl] = session.exec(
-                select(EmailTemplate).where(EmailTemplate.level == lvl)
-            ).count()
-        return out
+            counts[lvl] = session.exec(
+                select(func.count())
+                .select_from(EmailTemplate)
+                .where(EmailTemplate.level == lvl)
+            ).scalar_one()
+        return counts
 # ---------------------------------------------
 
 @app.on_event("startup")
