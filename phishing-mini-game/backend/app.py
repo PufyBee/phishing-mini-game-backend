@@ -48,9 +48,8 @@ _SAMPLES = [
 ]
 
 def seed_if_empty() -> Dict[str, int]:
-    """Insert sample templates if table is empty; return per-level counts."""
+    """Insert sample templates if table is empty; return per-level counts (version-agnostic)."""
     with Session(engine) as session:
-        # Seed only if empty
         exists = session.exec(select(EmailTemplate.id)).first()
         if not exists:
             session.add_all([
@@ -59,13 +58,22 @@ def seed_if_empty() -> Dict[str, int]:
             ])
             session.commit()
 
-        # Version-agnostic counts (works on SQLAlchemy 1.4/2.0)
-        counts: Dict[str, int] = {}
-        for lvl in ("easy", "medium", "hard"):
-            counts[lvl] = session.exec(
-                select(func.count(EmailTemplate.id)).where(EmailTemplate.level == lvl)
-            ).one()[0]  # returns a 1-tuple like (5,)
-        return counts
+        # Robust count that works across SQLAlchemy/SQLModel versions
+        def level_count(lvl: str) -> int:
+            try:
+                # Prefer scalar() if available: returns the first column of first row
+                val = session.exec(
+                    select(func.count(EmailTemplate.id)).where(EmailTemplate.level == lvl)
+                ).scalar()
+                return int(val or 0)
+            except Exception:
+                # Last-ditch fallback: just count IDs in Python
+                ids = session.exec(
+                    select(EmailTemplate.id).where(EmailTemplate.level == lvl)
+                ).all()
+                return len(ids)
+
+        return {lvl: level_count(lvl) for lvl in ("easy", "medium", "hard")}
 # ---------------------------------------------
 
 @app.on_event("startup")
@@ -73,7 +81,7 @@ def on_startup():
     create_db_and_tables()
     seed_if_empty()
 
-# debug helpers
+# debug helpers (safe to keep during dev)
 @app.get("/debug/counts")
 def debug_counts():
     return seed_if_empty()
